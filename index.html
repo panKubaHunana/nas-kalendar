@@ -574,25 +574,25 @@ const G=(function(){
   let ready=false,token=null,expires=0,tokenClient=null,pending=[],loaded={from:"",to:""},storeId=null,saveT=null;
   const status=m=>{const el=$("#status");if(el)el.textContent=m};
   if(!LIVE)return{saveStore(){},ensure(){}};
-  try{const t=JSON.parse(sessionStorage.getItem("nk-tok")||"null");if(t&&t.exp>Date.now()+60000){token=t.v;expires=t.exp}}catch(e){}
+  try{const t=JSON.parse(localStorage.getItem("nk-tok")||"null");if(t&&t.exp>Date.now()+60000){token=t.v;expires=t.exp}}catch(e){}
 
   function loadGis(){return new Promise((res,rej)=>{if(window.google&&google.accounts)return res();
     const sc=document.createElement("script");sc.src="https://accounts.google.com/gsi/client";sc.onload=res;sc.onerror=()=>rej(new Error("nelze načíst přihlášení Google"));document.head.appendChild(sc)})}
   async function getToken(interactive){
     if(token&&expires>Date.now()+60000)return token;
-    await loadGis();
-    if(!tokenClient)tokenClient=google.accounts.oauth2.initTokenClient({client_id:CONFIG.clientId,scope:SCOPES,callback:r=>{
+    if(!interactive){$("#gBtn").hidden=false;status("Přihlášení vypršelo – klikni na „Přihlásit Google“.");throw new Error("je potřeba se přihlásit")}await loadGis();
+    if(!tokenClient)tokenClient=google.accounts.oauth2.initTokenClient({client_id:CONFIG.clientId,scope:SCOPES,error_callback:er=>{const q=pending;pending=[];q.forEach(p=>p.rej(new Error(er&&er.type||"okno přihlášení bylo zavřeno")))},callback:r=>{
       const q=pending;pending=[];
       if(r.error){q.forEach(p=>p.rej(new Error(r.error)));return}
       token=r.access_token;expires=Date.now()+(r.expires_in-30)*1000;
-      try{sessionStorage.setItem("nk-tok",JSON.stringify({v:token,exp:expires}))}catch(e){}
+      try{localStorage.setItem("nk-tok",JSON.stringify({v:token,exp:expires}))}catch(e){}
       $("#gBtn").hidden=true;q.forEach(p=>p.res(token))}});
-    return new Promise((res,rej)=>{pending.push({res,rej});tokenClient.requestAccessToken({prompt:interactive?"consent":""})});
+    return new Promise((res,rej)=>{pending.push({res,rej});tokenClient.requestAccessToken({prompt:""})});
   }
   async function api(url,opt={}){
     const t=await getToken(false);
     const r=await fetch(url,Object.assign({},opt,{headers:Object.assign({Authorization:"Bearer "+t},opt.body&&typeof opt.body==="string"?{"Content-Type":"application/json"}:{},opt.headers||{})}));
-    if(r.status===401){token=null;try{sessionStorage.removeItem("nk-tok")}catch(e){}throw new Error("přihlášení vypršelo")}
+    if(r.status===401){token=null;try{localStorage.removeItem("nk-tok")}catch(e){}throw new Error("přihlášení vypršelo")}
     if(!r.ok){let m=r.status+"";try{m=(await r.json()).error.message}catch(e){}throw new Error(m)}
     return r.status===204?null:r.headers.get("content-type")?.includes("json")?r.json():r.text();
   }
@@ -654,9 +654,9 @@ const G=(function(){
     else await api("https://www.googleapis.com/upload/drive/v3/files/"+storeId+"?uploadType=media",{method:"PATCH",body:data,headers:{"Content-Type":"application/json"}});
   }
   function saveStore(){clearTimeout(saveT);saveT=setTimeout(()=>writeStore().catch(err=>toast("Úkoly se nepodařilo uložit: "+err.message)),1200)}
-  async function start(interactive){
+  async function start(interactive){if(!interactive&&!(token&&expires>Date.now()+60000)){status("Klikni vpravo nahoře na „Přihlásit Google“ a načtou se vaše kalendáře.");$("#gBtn").hidden=false;return}
     try{await getToken(interactive);await loadStore();ready=true;await ensure(true)}
-    catch(err){status("Přihlas se tlačítkem „Přihlásit Google“.");$("#gBtn").hidden=false}
+    catch(err){status("Přihlášení se nepovedlo ("+err.message+"). Zkus znovu „Přihlásit Google“.");$("#gBtn").hidden=false}
   }
   $("#gBtn").onclick=()=>start(true);
   document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&token)ensure(true)});
